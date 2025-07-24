@@ -69,12 +69,12 @@ El análisis generará un tablero de control interactivo en HTML (ubicado en `ou
 
 ## Conclusiones y Recomendaciones
 
-[Aquí añadirás tus principales hallazgos y las estrategias propuestas una vez que completes el análisis.]
+
 
 ## Contacto
 
-[Tu Nombre]
-[Tu Correo Electrónico]
-[Tu Perfil de LinkedIn (opcional)]
+
+miguel.patino.mba@gmail.com
+
 
 ---
