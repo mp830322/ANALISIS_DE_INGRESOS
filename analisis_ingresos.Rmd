@@ -1,0 +1,293 @@
+---
+title: "Dashboard de Análisis de Ingresos Comparativos (2023-2025)"
+author: "Miguel Patiño"
+date: "`r format(Sys.time(), '%d de %B, %Y')`"
+output:
+  html_document:
+    theme: cosmo
+    highlight: textmate
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6)
+
+# Cargar librerías
+library(readxl)       # Para leer archivos Excel
+library(tidyverse)    # Para manipulación y visualización de datos (ggplot2, dplyr)
+library(lubridate)    # Para trabajar con fechas
+library(plotly)       # Para gráficos interactivos
+library(DT)           # Para tablas interactivas
+library(ggiraphExtra) # Para algunos tipos de gráficos avanzados (opcional)
+library(forecast)     # Para modelos de series de tiempo (ARIMA, Holt-Winters)
+library(tseries)      # Para pruebas de series de tiempo (ADF)
+library(seasonal)     # Para descomposición estacional (X-13ARIMA-SEATS)
+library (flexdashboard)
+library (ggplot2)
+
+```
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Chart A
+```{r}
+# Ruta del archivo de datos (asumiendo que está en la carpeta 'data')
+file_path <- "data/ingresos.xlsx"
+
+# Cargar los datos
+df <- read_excel(file_path)
+
+# Mostrar las primeras filas y estructura de los datos
+cat("Dimensiones de los datos:", dim(df), "\n")
+head(df) %>% datatable(options = list(pageLength = 5, dom = 'tip'))
+str(df)
+
+```
+
+```{r}
+# Convertir FECHA a formato de fecha
+df$FECHA <- as.Date(df$FECHA)
+
+# Asegurar que MONTO es numérico
+df$MONTO <- as.numeric(df$MONTO)
+
+# Rellenar valores NA en columnas clave si los hubiera (ej. 0 para montos)
+df <- df %>%
+  mutate(
+    MONTO = ifelse(is.na(MONTO), 0, MONTO),
+    RECAT = ifelse(is.na(RECAT), "Desconocido", RECAT),
+    AGRUPACION = ifelse(is.na(AGRUPACION), "Desconocido", AGRUPACION),
+    INDICE = ifelse(is.na(INDICE), "Desconocido", INDICE)
+  )
+
+
+```
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Chart b
+```{r}
+
+# Crear columnas adicionales para análisis (ej. Mes-Año para series de tiempo)
+df <- df %>%
+  mutate(
+    MES_NOMBRE = factor(month(FECHA, label = TRUE, abbr = FALSE),
+                        levels = c("enero", "febrero", "marzo", "abril", "mayo", "junio",
+                                   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")),
+    ANIO_MES = format(FECHA, "%Y-%m"), # Formato para series de tiempo
+    SEMANA_DEL_ANIO = isoweek(FECHA) # Número de la semana del año
+  )
+
+# Verificar la estructura después de la limpieza
+cat("Estructura de los datos después de la limpieza:\n")
+str(df)
+
+```
+
+```{r}
+ingresos_anuales <- df %>%
+  group_by(ANIO) %>%
+filter(INDICE == "INGRESO")   %>% 
+  summarise(Total_Ingresos = sum(MONTO, na.rm = TRUE)) %>%
+  ungroup()
+```
+
+```{r}
+
+p_anual <- ggplot(ingresos_anuales, aes(x = factor(ANIO), y = Total_Ingresos, fill = factor(ANIO))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = scales::dollar(Total_Ingresos, prefix = "$", big.mark = ",")), vjust = -0.5, size = 3) +
+  labs(title = "Ingresos Totales por Año",
+       x = "Año",
+       y = "Total de Ingresos",
+       fill = "Año") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", big.mark = ",")) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplotly(p_anual)
+```
+
+```{r}
+
+
+ingresos_mensuales <- df %>%
+  group_by(ANIO, MES_NOMBRE) %>%
+filter(INDICE == "INGRESO")   %>% 
+  summarise(Total_Ingresos = sum(MONTO, na.rm = TRUE)) %>%
+  ungroup()
+
+p_mensual <- ggplot(ingresos_mensuales, aes(x = MES_NOMBRE, y = Total_Ingresos, color = factor(ANIO), group = factor(ANIO))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Ingresos Mensuales Comparativos por Año",
+       x = "Mes",
+       y = "Total de Ingresos",
+       color = "Año") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", big.mark = ",")) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggplotly(p_mensual)
+```
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Chart c
+```{r}
+
+
+ingresos_indice_anual <- df %>%
+  group_by(ANIO, INDICE) %>%
+  summarise(Total_Ingresos = sum(MONTO, na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(ANIO, desc(Total_Ingresos))
+
+p_indice <- ggplot(ingresos_indice_anual, aes(x = INDICE, y = Total_Ingresos, fill = factor(ANIO))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Ingresos por 'INDICE' (Comparativo Anual)",
+       x = "Índice de Agrupación",
+       y = "Total de Ingresos",
+       fill = "Año") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", big.mark = ",")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5))
+
+ggplotly(p_indice)
+```
+
+```{r}
+
+# Selecciona las 10 principales RECATs para evitar un gráfico sobrecargado
+top_recat <- df %>%
+  group_by(RECAT) %>%
+  summarise(Total_Ingresos = sum(MONTO, na.rm = TRUE)) %>%
+  arrange(desc(Total_Ingresos)) %>%
+  head(10) %>%
+  pull(RECAT)
+
+ingresos_recat_anual <- df %>%
+  filter(RECAT %in% top_recat) %>%
+  group_by(ANIO, RECAT) %>%
+  summarise(Total_Ingresos = sum(MONTO, na.rm = TRUE)) %>%
+  ungroup() %>%
+  arrange(ANIO, desc(Total_Ingresos))
+
+p_recat <- ggplot(ingresos_recat_anual, aes(x = RECAT, y = Total_Ingresos, fill = factor(ANIO))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Ingresos por 'RECAT' (Top 10 - Comparativo Anual)",
+       x = "Reclasificación de Concepto",
+       y = "Total de Ingresos",
+       fill = "Año") +
+  scale_y_continuous(labels = scales::dollar_format(prefix = "$", big.mark = ",")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5))
+
+ggplotly(p_recat)
+```
+
+```{r}
+# Preprocesar datos para series de tiempo: Agrupar por INDICE y ANIO_MES
+ingresos_ts <- df %>%
+  group_by(ANIO_MES, INDICE) %>%
+  summarise(Monto_Mensual = sum(MONTO, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(FECHA_TS = ymd(paste0(ANIO_MES, "-01"))) %>%
+  arrange(INDICE, FECHA_TS)
+
+# Obtener una lista única de INDICEs para iterar
+indices_unicos <- unique(ingresos_ts$INDICE)
+
+# Calcular el número de meses entre la primera y última fecha para la frecuencia de la serie de tiempo
+# Esto es importante para asegurar que la serie de tiempo tenga la longitud correcta
+min_date <- min(ingresos_ts$FECHA_TS)
+max_date <- max(ingresos_ts$FECHA_TS)
+num_months <- interval(min_date, max_date) %/% months(1) + 1
+
+# Bucle para analizar cada INDICE
+for (idx in indices_unicos) {
+  cat("\n### **Análisis de Series de Tiempo para INDICE:** `", idx, "`\n\n")
+
+  data_subset <- ingresos_ts %>%
+    filter(INDICE == idx) %>%
+    # Asegurar que haya una entrada para cada mes, rellenando con 0 si no hay ingresos
+    complete(FECHA_TS = seq(min(FECHA_TS), max(FECHA_TS), by = "month"), fill = list(Monto_Mensual = 0)) %>%
+    arrange(FECHA_TS)
+
+  # Convertir a objeto de serie de tiempo (ts)
+  # Usamos una frecuencia de 12 para datos mensuales
+  # start = c(año, mes de inicio)
+  start_year <- year(min(data_subset$FECHA_TS))
+  start_month <- month(min(data_subset$FECHA_TS))
+
+  ts_data <- ts(data_subset$Monto_Mensual, start = c(start_year, start_month), frequency = 12)
+
+  cat("#### Serie de Tiempo Original para", idx, "\n")
+  
+
+  p_original_ts <- plot_ly(data_subset, x = ~FECHA_TS, y = ~Monto_Mensual, type = 'scatter', mode = 'lines',
+                           name = "Ingresos Mensuales") %>%
+    layout(title = paste("Ingresos Mensuales de", idx),
+           xaxis = list(title = "Fecha"),
+           yaxis = list(title = "Monto", tickformat = "$,"))
+  print(p_original_ts)
+  cat("\n")
+
+  # Descomposición de la serie de tiempo (Tendencia, Estacionalidad, Residuo)
+  # Usamos STL (Seasonal-Trend decomposition using Loess) para una descomposición robusta.
+  # Si tienes menos de 2 ciclos completos (24 meses), es posible que STL falle o no sea representativo.
+  if (length(ts_data) >= 24) { # Se necesitan al menos 2 periodos para STL
+    cat("#### Descomposición STL (Seasonal-Trend decomposition using Loess)\n")
+    ts_decomposed <- stl(ts_data, s.window = "periodic") # s.window = "periodic" para estacionalidad constante
+    plot(ts_decomposed, main = paste("Descomposición STL para", idx))
+    cat("\n")
+
+    # Series desestacionalizadas (eliminando el ruido estacional)
+    deseasonalized_ts <- ts_data - ts_decomposed$time.series[, "seasonal"]
+    cat("#### Serie Desestacionalizada (sin Ruido Estacional)\n")
+    p_deseasonalized <- plot_ly(x = time(deseasonalized_ts), y = deseasonalized_ts, type = 'scatter', mode = 'lines',
+                                name = "Desestacionalizada") %>%
+      layout(title = paste("Serie Desestacionalizada para", idx),
+             xaxis = list(title = "Fecha"),
+             yaxis = list(title = "Monto Desestacionalizado", tickformat = "$,"))
+    print(p_deseasonalized)
+    cat("\n")
+
+    # Suavizado de la Tendencia (eliminando el ruido residual)
+    # Podemos usar un filtro de media móvil o el componente de tendencia de STL
+    smoothed_trend <- ts_decomposed$time.series[, "trend"]
+    cat("#### Componente de Tendencia Suavizada\n")
+    p_trend <- plot_ly(x = time(smoothed_trend), y = smoothed_trend, type = 'scatter', mode = 'lines',
+                       name = "Tendencia Suavizada") %>%
+      layout(title = paste("Tendencia Suavizada para", idx),
+             xaxis = list(title = "Fecha"),
+             yaxis = list(title = "Monto de Tendencia", tickformat = "$,"))
+    print(p_trend)
+    cat("\n")
+
+    # Graficar la serie original, desestacionalizada y suavizada en un solo gráfico (opcional)
+    plot_ly() %>%
+      add_trace(x = time(ts_data), y = ts_data, type = 'scatter', mode = 'lines', name = 'Original') %>%
+      add_trace(x = time(deseasonalized_ts), y = deseasonalized_ts, type = 'scatter', mode = 'lines', name = 'Desestacionalizada') %>%
+      add_trace(x = time(smoothed_trend), y = smoothed_trend, type = 'scatter', mode = 'lines', name = 'Tendencia Suavizada') %>%
+      layout(title = paste("Original, Desestacionalizada y Tendencia Suavizada para", idx),
+             xaxis = list(title = "Fecha"),
+             yaxis = list(title = "Monto", tickformat = "$,")) %>%
+      print()
+    cat("\n")
+
+  } else {
+    cat("  *Nota: No hay suficientes datos (se requieren al menos 24 meses) para realizar una descomposición STL significativa para el 'INDICE':", idx, "*\n\n")
+  }
+}
+```
